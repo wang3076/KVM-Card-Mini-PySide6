@@ -10,7 +10,11 @@
 #define DEBUG_PRT 0
 #define DevEP0SIZE 0x40
 // 设备描述符
-const uint8_t MyDevDescr[] = {0x12, 0x01,       0x10, 0x01, 0x00, 0x00,
+// bcdUSB = 0x0200 (USB 2.0), 非 0x0110 (USB 1.1)。关键：Windows 只有在设备
+// 声明 bcdUSB >= 0x0200 时才会查询 Microsoft OS 描述符(0xEE 字符串/BOS)，
+// bcdUSB=0x0110 会让 Windows 完全跳过 MS OS 查询 → 不自动加载 WinUSB。
+// CH582F 运行在 full-speed(12Mbps)，属 USB 2.0 设备，声明 0x0200 正确。
+const uint8_t MyDevDescr[] = {0x12, 0x01,       0x00, 0x02, 0x00, 0x00,
                               0x00, DevEP0SIZE, 0x3d, 0x41, 0x07, 0x21,
                               0x00, 0x01,       0x01, 0x02, 0x00, 0x01};
 // 配置描述符
@@ -22,15 +26,17 @@ const uint8_t MyCfgDescr[] = {
     0x07, 0x05, 0x01, 0x03, 0x40, 0x00, 0x01               // 端点描述符
 };
 
-/* BOS Descriptor (Binary Object Store) for WebUSB support */
+/* BOS Descriptor (Binary Object Store) for WebUSB + Microsoft OS 2.0 support.
+   wTotalLength = 5 (header) + 24 (WebUSB cap) + 28 (MS OS 2.0 cap) = 57 = 0x39.
+   bNumDeviceCaps = 2. */
 const uint8_t USB_BOSDescr[] = {
     // BOS Header
     0x05,                   // bLength (5 bytes)
     0x0F,                   // bDescriptorType: BOS
-    0x1D, 0x00,             // wTotalLength (29 bytes: 5 header + 24 platform cap)
-    0x01,                   // bNumDeviceCaps: 1
+    0x39, 0x00,             // wTotalLength (57 bytes)
+    0x02,                   // bNumDeviceCaps: 2
 
-    // WebUSB Platform Capability Descriptor
+    // WebUSB Platform Capability Descriptor (bVendorCode = 0x01)
     0x18,                   // bLength (24 bytes)
     0x10,                   // bDescriptorType: Device Capability
     0x05,                   // bDevCapabilityType: Platform
@@ -43,7 +49,56 @@ const uint8_t USB_BOSDescr[] = {
     0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65, // UUID bytes 10-15
     0x00, 0x01,             // bcdVersion: 1.00 (WebUSB 1.0)
     0x01,                   // bVendorCode: 0x01
-    0x00                    // iLandingPage: 0 (no landing page)
+    0x00,                   // iLandingPage: 0 (no landing page)
+
+    // Microsoft OS 2.0 Platform Capability Descriptor (bMS_VendorCode = 0x02)
+    0x1C,                   // bLength (28 bytes)
+    0x10,                   // bDescriptorType: Device Capability
+    0x05,                   // bDevCapabilityType: Platform
+    0x00,                   // bReserved
+    // PlatformCapabilityUUID {D8DD60DF-4589-4CC7-9CD2-659D9E648A9F} (MS OS 2.0)
+    0xDF, 0x60, 0xDD, 0xD8, // UUID bytes 0-3 (little-endian)
+    0x89, 0x45,             // UUID bytes 4-5
+    0xC7, 0x4C,             // UUID bytes 6-7
+    0x9C, 0xD2,             // UUID bytes 8-9
+    0x65, 0x9D, 0x9E, 0x64, 0x8A, 0x9F, // UUID bytes 10-15
+    0x00, 0x00, 0x03, 0x06, // dwWindowsVersion: 0x06030000 (Windows 8.1+)
+    0x2E, 0x00,             // wMSOSDescriptorSetTotalLength: 46 = 0x2E
+    MSOS20_VENDOR_CODE,     // bMS_VendorCode: 0x02 (bRequest to fetch OS 2.0 set)
+    0x00                    // bAltEnumCode: 0 (no alternate enumeration)
+};
+
+/* Microsoft OS 2.0 Descriptor Set (46 bytes).
+   Declares interface 0 as compatible with WinUSB so Windows 8.1/10/11 auto-load
+   winusb.sys (no Zadig / no INF needed). Served on vendor request
+   bRequest == MSOS20_VENDOR_CODE, wIndex == MSOS20_DESCRIPTOR_INDEX.
+   Layout: SetHeader(10) + ConfigSubset(8) + FunctionSubset(8) + CompatID(20) = 46. */
+const uint8_t MS_OS_20_DescriptorSet[] = {
+    // ---- Microsoft OS 2.0 Descriptor Set Header ----
+    0x0A, 0x00,             // wLength: 10
+    0x00, 0x00,             // wDescriptorType: MS_OS_20_SET_HEADER (0)
+    0x00, 0x00, 0x03, 0x06, // dwWindowsVersion: 0x06030000
+    0x2E, 0x00,             // wTotalLength: 46 (0x2E)
+
+    // ---- Configuration Subset Header ----
+    0x08, 0x00,             // wLength: 8
+    0x01, 0x00,             // wDescriptorType: MS_OS_20_SUBSET_HEADER_CONFIG (1)
+    0x00,                   // bConfigurationValue: configuration 1 (0-indexed)
+    0x00,                   // bReserved: 0
+    0x24, 0x00,             // wTotalLength: config subset total = 36 (0x24)
+
+    // ---- Function Subset Header ----
+    0x08, 0x00,             // wLength: 8
+    0x02, 0x00,             // wDescriptorType: MS_OS_20_SUBSET_HEADER_FUNCTION (2)
+    0x00,                   // bFirstInterface: interface 0
+    0x00,                   // bReserved: 0
+    0x1C, 0x00,             // wSubsetLength: function subset total = 28 (0x1C)
+
+    // ---- Compatible ID Descriptor (WINUSB) ----
+    0x14, 0x00,             // wLength: 20
+    0x03, 0x00,             // wDescriptorType: MS_OS_20_FEATURE_COMPATIBLE_ID (3)
+    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,  // compatibleID: "WINUSB\0\0"
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00   // subCompatibleID: all zero
 };
 
 // WebUSB URL Descriptor (empty URL for index 0 / non-existent requests)
@@ -51,6 +106,36 @@ const uint8_t USB_URLDescr[] = {
     0x03,                   // bLength
     0x03,                   // bDescriptorType: URL
     0xFF,                   // bScheme: no URL scheme
+};
+
+/* Microsoft OS String Descriptor (index 0xEE).
+   Returns "MSFT100" + bMS_VendorCode so Windows knows this device supports
+   Microsoft OS Descriptors, then queries the Extended Compat ID descriptor
+   via a vendor request bRequest = MS_OS_VENDOR_CODE (0xEE), wIndex = 0x0004.
+   Only Windows reads this; Android/Linux never request index 0xEE. */
+const uint8_t MS_OS_StringDescr[] = {
+    0x12,                   // bLength: 18 bytes
+    0x03,                   // bDescriptorType: String (0x03)
+    'M', 0, 'S', 0, 'F', 0, 'T', 0, '1', 0, '0', 0, '0', 0,  // "MSFT100" UTF-16LE (14 bytes)
+    MS_OS_VENDOR_CODE,      // bMS_VendorCode: 0xEE
+    0x00                    // bPad
+};
+
+/* Microsoft OS Extended Compat ID OS Feature Descriptor (wIndex = 0x0004).
+   Declares interface 0's compatible ID as "WINUSB", so Windows loads winusb.sys
+   automatically and Chrome's WebUSB can claim the interface. dwLength = 40. */
+const uint8_t MS_OS_CompatIDDescr[] = {
+    0x28, 0x00, 0x00, 0x00, // dwLength: 40 bytes
+    0x00, 0x01,             // bcdVersion: 1.00
+    MS_OS_COMPATID_INDEX & 0xFF, MS_OS_COMPATID_INDEX >> 8,  // wIndex: 0x0004
+    0x01,                   // bCount: 1 function section
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 7 reserved bytes
+    // --- Function section for interface 0 (24 bytes) ---
+    0x00,                   // bFirstInterfaceNumber: 0
+    0x01,                   // bReserved: 1
+    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,  // compatibleID: "WINUSB\0\0"
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // subCompatibleID: all zero
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00         // 6 reserved bytes
 };
 /*字符串描述符略*/
 /*HID类报表描述符*/
@@ -123,7 +208,7 @@ uint8_t EP3_Databuf[64 + 64];  // ep3_out(64)+ep3_in(64)
 //---------------------------------------------------------------------------------------
 #define U2DevEP0SIZE 0x40
 // 设备描述符
-const uint8_t U2MyDevDescr[] = {0x12, 0x01,         0x10, 0x01, 0x00, 0x00,
+const uint8_t U2MyDevDescr[] = {0x12, 0x01,         0x00, 0x02, 0x00, 0x00,
                                 0x00, U2DevEP0SIZE, 0x3d, 0x41, 0x08, 0x21,
                                 0x00, 0x01,         0x01, 0x02, 0x00, 0x01};
 /*HID类报表描述符*/
@@ -432,7 +517,7 @@ void USB_DevTransProcess(void)  // USB设备传输中断处理
         if (pSetupReqPak->bRequestType &
             0x40)  // 取得命令中的某一位，判断是否为0，不为零进if语句
         {
-          /* 厂商请求 - WebUSB vendor requests */
+          /* 厂商请求 - WebUSB / Microsoft OS vendor requests */
           if (SetupReqCode == WEBUSB_VENDOR_CODE)  // bRequest == bVendorCode (0x01)
           {
             switch (pSetupReqPak->wIndex & 0xFF)  // Low byte of wIndex
@@ -447,6 +532,44 @@ void USB_DevTransProcess(void)  // USB设备传输中断处理
               default:
                 errflag = 0xFF;  // Unsupported WebUSB sub-request
                 break;
+            }
+          }
+          else if (SetupReqCode == MSOS20_VENDOR_CODE)  // 0x02 - Microsoft OS 2.0 Descriptor request
+          {
+            // Windows 8.1/10/11 sends bRequest == bMS_VendorCode (0x02) with
+            // wIndex == MS_OS_20_DESCRIPTOR_INDEX (0x0007) to fetch the whole
+            // OS 2.0 descriptor set that declares this interface as WinUSB.
+            if (pSetupReqPak->wIndex == MSOS20_DESCRIPTOR_INDEX)
+            {
+              // Return full MS OS 2.0 descriptor set (46 bytes < 64, single packet).
+              pDescr = MS_OS_20_DescriptorSet;
+              len = sizeof(MS_OS_20_DescriptorSet);
+              if (SetupReqLen > len) SetupReqLen = len;   // cap to actual descriptor size
+              len = (SetupReqLen >= DevEP0SIZE) ? DevEP0SIZE : SetupReqLen;
+              memcpy(pEP0_DataBuf, pDescr, len);          // load EP0 RAM for DMA send
+              pDescr += len;
+            }
+            else
+            {
+              errflag = 0xFF;  // Unsupported MS OS 2.0 sub-request
+            }
+          }
+          else if (SetupReqCode == MS_OS_VENDOR_CODE)  // 0xEE - Microsoft OS 1.0 Descriptor request
+          {
+            if (pSetupReqPak->wIndex == MS_OS_COMPATID_INDEX)  // 0x0004: Extended Compat ID
+            {
+              // Return Extended Compat ID descriptor so Windows auto-loads WinUSB.
+              // (40 bytes < 64, so it always fits in a single EP0 packet.)
+              pDescr = MS_OS_CompatIDDescr;
+              len = sizeof(MS_OS_CompatIDDescr);
+              if (SetupReqLen > len) SetupReqLen = len;   // cap to actual descriptor size
+              len = (SetupReqLen >= DevEP0SIZE) ? DevEP0SIZE : SetupReqLen;
+              memcpy(pEP0_DataBuf, pDescr, len);          // load EP0 RAM for DMA send
+              pDescr += len;
+            }
+            else
+            {
+              errflag = 0xFF;  // Unsupported MS OS feature descriptor index
             }
           }
           else
@@ -554,6 +677,10 @@ void USB_DevTransProcess(void)  // USB设备传输中断处理
                   case 0:
                     pDescr = MyLangDescr;
                     len = MyLangDescr[0];
+                    break;
+                  case MS_OS_STRING_INDEX:  // 0xEE - Microsoft OS String Descriptor
+                    pDescr = MS_OS_StringDescr;
+                    len = MS_OS_StringDescr[0];
                     break;
                   default:
                     errflag = 0xFF;  // 不支持的字符串描述符

@@ -1745,6 +1745,28 @@ extern "C" {
 #define WEBUSB_GET_URL          0x02  /* wIndex value for GET_URL sub-request */
 #endif
 
+/* Microsoft OS Descriptors (MS OS 1.0) — auto-bind this interface to WinUSB on Windows.
+   bMS_VendorCode below is the bRequest value Windows uses to fetch the Extended
+   Compat ID feature descriptor (wIndex == MS_OS_COMPATID_INDEX). Android/Linux
+   ignore these entirely, so dual-platform (Windows + Android) enumeration is safe. */
+#ifndef MS_OS_VENDOR_CODE
+#define MS_OS_VENDOR_CODE       0xEE  /* bVendorCode in OS String Descriptor (index 0xEE) */
+#define MS_OS_STRING_INDEX      0xEE  /* String descriptor index that returns "MSFT100" */
+#define MS_OS_COMPATID_INDEX    0x0004 /* wIndex for Extended Compat ID OS Feature Descriptor */
+#endif
+
+/* Microsoft OS Descriptor 2.0 (preferred on Windows 8.1 / 10 / 11) constants.
+   The device advertises an MS OS 2.0 Platform Capability in its BOS descriptor;
+   Windows then sends a vendor request with bRequest == MSOS20_VENDOR_CODE and
+   wIndex == MSOS20_DESCRIPTOR_INDEX to fetch the full OS 2.0 descriptor set,
+   which declares this interface as compatible with the WinUSB driver.
+   Android/Linux never issue this request, so dual-platform support is preserved.
+   bMS_VendorCode 0x02 is distinct from WebUSB's 0x01. */
+#ifndef MSOS20_VENDOR_CODE
+#define MSOS20_VENDOR_CODE      0x02  /* bRequest used to retrieve the OS 2.0 descriptor set */
+#define MSOS20_DESCRIPTOR_INDEX 0x0007 /* wIndex value = MS_OS_20_DESCRIPTOR_INDEX (7) */
+#endif
+
 /* USB device class */
 #ifndef USB_DEV_CLASS_HUB
 #define USB_DEV_CLASS_RESERVED  0x00

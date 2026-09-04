@@ -5,8 +5,21 @@
 
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-TOOLCHAIN="/c/MounRiver/MounRiver_Studio/MounRiver_Studio2/resources/app/resources/win32/components/WCH/Toolchain/RISC-V Embedded GCC"
+# --- Resolve paths in native Windows form (the riscv gcc.exe is a Windows
+#     binary and cannot read POSIX /e/... paths from Git Bash). cygpath -w
+#     converts a POSIX path to a Windows path; on non-MSYS shells cygpath
+#     may be absent, so fall back to the raw path. ---
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    P2W() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
+    ;;
+  *)
+    P2W() { echo "$1"; }
+    ;;
+esac
+
+PROJECT_ROOT="$(P2W "$(cd "$(dirname "$0")" && pwd)")"
+TOOLCHAIN="$(P2W "/d/devel/MounRiver_Studio2/resources/app/resources/win32/components/WCH/Toolchain/RISC-V Embedded GCC")"
 CC="${TOOLCHAIN}/bin/riscv-none-embed-gcc.exe"
 OBJCOPY="${TOOLCHAIN}/bin/riscv-none-embed-objcopy.exe"
 SIZE="${TOOLCHAIN}/bin/riscv-none-embed-size.exe"
