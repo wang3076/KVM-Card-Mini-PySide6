@@ -31,6 +31,7 @@ const $mouseStat = $('$mouseStat');
 
 const $cameraSelect = $('$cameraSelect');
 const $cameraRefresh = $('$cameraRefresh');
+const $mjpegUrl    = $('$mjpegUrl');
 const $fullscreen = $('$fullscreen');
 const $mjpeg      = $('$mjpeg');
 const $keyToggle  = $('$keyToggle');
@@ -395,7 +396,7 @@ $cameraRefresh.addEventListener('click', () => { refreshCameraList(); const id =
    MJPEG fallback for Android (USB Camera Server: http://localhost:8080/stream)
    ========================================================================== */
 function tryMJPEG() {
-  const mjpegUrl = 'http://localhost:8080/stream';
+  const mjpegUrl = $mjpegUrl.value.trim() || 'http://localhost:8081/stream';
   debugLog('MJPEG: 尝试 ' + mjpegUrl);
   $mjpeg.src = mjpegUrl;
   $mjpeg.onload = () => {
